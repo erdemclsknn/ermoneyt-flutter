@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "744845349252",
+    "project_id": "ermoneyt-ecommerce",
+    "storage_bucket": "ermoneyt-ecommerce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:744845349252:android:c82cbdb945ff6b8b0c4dd1",
+        "android_client_info": {
+          "package_name": "com.ermoneyt.ecommerce"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAv54Wo__dgQ_4SM9Nv4ZkaWrxL-l9Er8E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
