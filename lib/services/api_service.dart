@@ -6,8 +6,8 @@ import '../models/product.dart';
 import '../models/banner_model.dart';
 
 class ApiService {
-  // kendi sunucun
-  static const String baseUrl = 'http://13.60.41.68:3000';
+  /// ✔ Sabit Elastic IP kullandık (değişmeyecek)
+  static const String baseUrl = 'http://51.20.206.19:3000';
 
   /* -------------------- ÜRÜNLER -------------------- */
 
@@ -44,14 +44,12 @@ class ApiService {
     if (res.statusCode == 200) {
       final List data = jsonDecode(res.body);
 
-      // sadece mobilde gösterilecekleri al
       final banners = data
           .map((e) => BannerModel.fromJson(e))
           .where((b) =>
               b.isActive && (b.place == 'mobile' || b.place == 'both'))
           .toList();
 
-      // sıraya göre diz
       banners.sort((a, b) => a.order.compareTo(b.order));
       return banners;
     } else {
