@@ -24,8 +24,8 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
   late Future<_HomeData> _future;
   String _search = '';
 
-  /// Kampanya popup’ını sadece 1 kere göstermek için flag
-  bool _campaignPopupShown = false;
+  /// Popup kontrolünü sadece 1 kere yapmak için (widget ömrü boyunca)
+  bool _campaignPopupInitDone = false;
 
   @override
   void initState() {
@@ -78,27 +78,78 @@ class _MobileHomeScreenState extends State<MobileHomeScreen> {
 
   /// Banner listesinde popup olarak kullanılacak banner’ı bul
   /// Admin panelde işaretlediğin `isPopup == true` + place=mobile/both olan ilk banner
-BannerModel? _findCampaignPopup(List<BannerModel> banners) {
-  for (final b in banners) {
-    if (b.isPopup == true) {
-      // place zaten String, null olamaz; ?? gerek yok
-      final place = b.place.toLowerCase();
-      if (place.isEmpty || place == 'mobile' || place == 'both') {
-        return b;
+  BannerModel? _findCampaignPopup(List<BannerModel> banners) {
+    for (final b in banners) {
+      if (b.isPopup == true) {
+        final place = b.place.toLowerCase();
+        if (place.isEmpty || place == 'mobile' || place == 'both') {
+          return b;
+        }
       }
     }
+    return null;
   }
-  return null;
-}
 
-  /// Kampanya popup dialog (tüm kampanyalı ürünler için)
+  /// Popup için ilgili ürün listesini üret
+  List<Product> _getBannerProductsForPopup(
+      BannerModel banner, List<Product> allProducts) {
+    if (banner.targetType == 'category') {
+      final target = banner.targetValue.trim().toLowerCase();
+      if (target.isEmpty) {
+        return allProducts.where((p) {
+          final cat = (p.category ?? '').toLowerCase();
+          return cat.contains(banner.title.toLowerCase());
+        }).toList();
+      }
+      return allProducts.where((p) {
+        final cat = (p.category ?? '').toLowerCase();
+        return cat.contains(target);
+      }).toList();
+    }
+
+    if (banner.targetType == 'product') {
+      return allProducts
+          .where((p) => p.id.toString() == banner.targetValue.toString())
+          .toList();
+    }
+
+    // Fallback: tüm kampanyalı ürünler
+    return allProducts.where((p) => p.hasCampaign).toList();
+  }
+
+  /// Web’deki localStorage mantığını Flutter’da taklit etmiyoruz;
+  /// sen istedin diye HER açılışta gösteriyoruz (state ömrü boyunca 1 kere).
+  Future<void> _maybeShowCampaignPopup(
+    BuildContext context, {
+    required List<BannerModel> banners,
+    required List<Product> allProducts,
+  }) async {
+    final popupBanner = _findCampaignPopup(banners);
+    if (popupBanner == null) return;
+
+    final bannerProducts = _getBannerProductsForPopup(
+      popupBanner,
+      allProducts,
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showCampaignPopup(
+        context,
+        banner: popupBanner,
+        bannerProducts: bannerProducts,
+      );
+    });
+  }
+
+  /// Kampanya popup dialog
   void _showCampaignPopup(
     BuildContext context, {
     required BannerModel banner,
-    required List<Product> campaignProducts,
+    required List<Product> bannerProducts,
+    VoidCallback? onClose,
   }) {
-    if (campaignProducts.isEmpty) {
-      // Kampanyalı ürün yoksa bilgi popup’ı
+    // İlgili ürün yoksa sadece bilgilendirme popup'ı
+    if (bannerProducts.isEmpty) {
       showDialog(
         context: context,
         barrierDismissible: true,
@@ -122,9 +173,7 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
                   ),
                 const SizedBox(height: 12),
                 Text(
-                  banner.title.isNotEmpty
-                      ? banner.title
-                      : 'Kampanya fırsatı!',
+                  banner.title.isNotEmpty ? banner.title : 'Kampanya fırsatı!',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white,
@@ -153,16 +202,18 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
             ),
           ),
         ),
-      );
+      ).then((_) => onClose?.call());
       return;
     }
 
+    // Ürün varsa "Ürünlere Git" butonlu popup
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) => Dialog(
         backgroundColor: const Color(0xFF131822),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -215,17 +266,68 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
                     ),
                     onPressed: () {
                       Navigator.of(context).pop();
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CategoryProductsScreen(
-                            category: banner.title.isNotEmpty
-                                ? banner.title
-                                : 'Kampanyalı Ürünler',
-                            allProducts: campaignProducts,
+
+                      // Hangi banner ise ona göre NAVIGATE
+                      if (banner.targetType == 'category') {
+                        final list = bannerProducts;
+                        if (list.isEmpty) return;
+
+                        String categoryName;
+                        final firstCat = list.first.category;
+
+                        if (firstCat != null && firstCat.isNotEmpty) {
+                          categoryName = firstCat;
+                        } else if (banner.targetValue.isNotEmpty) {
+                          categoryName = banner.targetValue;
+                        } else {
+                          categoryName = banner.title;
+                        }
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CategoryProductsScreen(
+                              category: categoryName,
+                              allProducts: list,
+                            ),
                           ),
-                        ),
-                      );
+                        );
+                      } else if (banner.targetType == 'product') {
+                        final list = bannerProducts;
+                        if (list.isEmpty) return;
+                        final p = list.first;
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ProductDetailScreen(product: p),
+                          ),
+                        );
+                      } else if (banner.targetType == 'url' &&
+                          banner.targetValue.isNotEmpty) {
+                        final uri = Uri.tryParse(banner.targetValue);
+                        if (uri != null) {
+                          launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      } else {
+                        // Fallback: kampanyalı ürün listesi
+                        final list = bannerProducts;
+                        if (list.isEmpty) return;
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CategoryProductsScreen(
+                              category: banner.title.isNotEmpty
+                                  ? banner.title
+                                  : 'Kampanyalı Ürünler',
+                              allProducts: list,
+                            ),
+                          ),
+                        );
+                      }
                     },
                     child: const Text('Ürünlere Git'),
                   ),
@@ -235,7 +337,7 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
           ),
         ),
       ),
-    );
+    ).then((_) => onClose?.call());
   }
 
   @override
@@ -283,24 +385,14 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
             return const Center(child: Text('Şu an yayınlanmış ürün yok'));
           }
 
-          // Tüm kampanyalı ürünler
-          final campaignProducts =
-              data.products.where((p) => p.hasCampaign).toList();
-
-          // Açılışta kampanya popup’ını bir kere göster (isPopup == true olan banner)
-          final popupBanner = _findCampaignPopup(data.banners);
-          if (!_campaignPopupShown &&
-              popupBanner != null &&
-              campaignProducts.isNotEmpty) {
-            _campaignPopupShown = true;
-            // instance null değil, bu yüzden ! veya ? gereksiz, direkt kullan
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _showCampaignPopup(
-                context,
-                banner: popupBanner,
-                campaignProducts: campaignProducts,
-              );
-            });
+          // Açılışta kampanya popup’ını bir kere göster
+          if (!_campaignPopupInitDone) {
+            _campaignPopupInitDone = true;
+            _maybeShowCampaignPopup(
+              context,
+              banners: data.banners,
+              allProducts: data.products,
+            );
           }
 
           final grouped = _groupByTopCategory(data.products);
@@ -330,7 +422,6 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
               data.banners.length > 1 ? data.banners[1] : null;
 
           // Anasayfada, kampanyaların ALTINDA gösterilecek kategori bölümleri
-          // (örnek: ilk 3 ana kategori, her biri yatay kaydırmalı)
           final categorySections = <Widget>[];
           const maxCategorySections = 3;
           int addedSections = 0;
@@ -425,16 +516,19 @@ BannerModel? _findCampaignPopup(List<BannerModel> banners) {
                   const SizedBox(height: 18),
 
                   // Kampanyalı ürünler bölümü
-                  if (campaignProducts.isNotEmpty) ...[
+                  if (data.products.any((p) => p.hasCampaign)) ...[
                     const SizedBox(height: 6),
                     _HorizontalProducts(
                       title: 'Kampanyalı Ürünler',
-                      products: campaignProducts.take(12).toList(),
+                      products: data.products
+                          .where((p) => p.hasCampaign)
+                          .take(12)
+                          .toList(),
                     ),
                     const SizedBox(height: 16),
                   ],
 
-                  // Kampanyaların ALTINDA: birkaç kategoriden ürünler (kaydırmalı + sonda "Daha fazlası")
+                  // Kampanyaların ALTINDA: birkaç kategoriden ürünler
                   ...categorySections,
 
                   const SizedBox(height: 12),
@@ -585,7 +679,7 @@ class _BannerSliderState extends State<_BannerSlider> {
 
     if (b.targetType == 'product') {
       final p = widget.allProducts.firstWhere(
-        (e) => e.id == b.targetValue,
+        (e) => e.id.toString() == b.targetValue.toString(),
         orElse: () => widget.allProducts.first,
       );
       Navigator.push(
@@ -741,7 +835,7 @@ class _WideBanner extends StatelessWidget {
 
     if (banner.targetType == 'product') {
       final p = allProducts.firstWhere(
-        (e) => e.id == banner.targetValue,
+        (e) => e.id.toString() == banner.targetValue.toString(),
         orElse: () => allProducts.first,
       );
       Navigator.push(
@@ -1043,9 +1137,10 @@ class _HorizontalProducts extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 13,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       _buildPrice(p),
@@ -1162,8 +1257,11 @@ class _CategoryProductsSection extends StatelessWidget {
                             ),
                           ),
                           SizedBox(width: 4),
-                          Icon(Icons.arrow_forward_ios,
-                              size: 13, color: Color(0xFFFFD166)),
+                          Icon(
+                            Icons.arrow_forward_ios,
+                            size: 13,
+                            color: Color(0xFFFFD166),
+                          ),
                         ],
                       ),
                     ),
@@ -1217,9 +1315,10 @@ class _CategoryProductsSection extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13),
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 13,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       _buildPrice(p),
@@ -1310,8 +1409,10 @@ class _FlashGrid extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (products.isEmpty)
-            const Text('Şu an ürün yok',
-                style: TextStyle(color: Colors.white54))
+            const Text(
+              'Şu an ürün yok',
+              style: TextStyle(color: Colors.white54),
+            )
           else
             GridView.builder(
               shrinkWrap: true,
@@ -1422,14 +1523,19 @@ class _AltinkapFooter extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.videogame_asset,
-              size: 34, color: Color(0xFFFFD166)),
+          const Icon(
+            Icons.videogame_asset,
+            size: 34,
+            color: Color(0xFFFFD166),
+          ),
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
               'AltınKap Oyunları • Oyna, taş kazan, çekilişlere katıl!',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           TextButton(

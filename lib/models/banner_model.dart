@@ -8,6 +8,7 @@ class BannerModel {
   final String place;
   final int order;
   final bool isActive;
+  final bool isPopup; // <-- ARTIK GERÇEK FIELD
 
   BannerModel({
     required this.id,
@@ -18,10 +19,8 @@ class BannerModel {
     required this.place,
     required this.order,
     required this.isActive,
+    required this.isPopup,
   });
-
-  // 🔥 EKLEMEN GEREKEN TEK ŞEY BU !
-  bool get isPopup => targetType == 'campaign';
 
   factory BannerModel.fromJson(Map<String, dynamic> json) {
     return BannerModel(
@@ -35,6 +34,22 @@ class BannerModel {
           ? json['order']
           : int.tryParse(json['order'].toString()) ?? 0,
       isActive: json['isActive'] != false,
+      // API'de isPopup veya is_popup gelebilir, ikisini de yakala
+      isPopup: json['isPopup'] == true || json['is_popup'] == true,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'imageUrl': imageUrl,
+      'targetType': targetType,
+      'targetValue': targetValue,
+      'place': place,
+      'order': order,
+      'isActive': isActive,
+      'isPopup': isPopup,
+    };
   }
 }
