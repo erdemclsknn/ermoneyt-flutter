@@ -1,9 +1,14 @@
 // lib/screens/settings_screen.dart
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  static const String _apiBase = 'http://51.20.206.19:3000';
 
   Future<void> _sendPasswordResetEmail(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -20,12 +25,17 @@ class SettingsScreen extends StatelessWidget {
 
     try {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$email adresine şifre sıfırlama maili gönderildi.'),
+          content: Text(
+            '$email adresine şifre sıfırlama maili gönderildi.',
+          ),
         ),
       );
     } catch (e) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Şifre sıfırlama maili gönderilemedi.'),
@@ -58,6 +68,257 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  void _openSupportSheet(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email ?? '';
+    final defaultName = user?.displayName ??
+        (email.isNotEmpty ? email.split('@').first : 'Mobil Kullanıcı');
+
+    final subjectController = TextEditingController();
+    final messageController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF131822),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        bool isSending = false;
+
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 12,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx2, setState) {
+              Future<void> send() async {
+                final subject = subjectController.text.trim();
+                final message = messageController.text.trim();
+
+                if (message.isEmpty) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Lütfen mesaj alanını doldur.'),
+                    ),
+                  );
+                  return;
+                }
+
+                setState(() => isSending = true);
+
+                try {
+                  final uri =
+                      Uri.parse('$_apiBase/api/contact-messages');
+
+                  final payload = {
+                    'name': defaultName,
+                    'email': email,
+                    'subject': subject.isEmpty
+                        ? 'Mobil destek talebi'
+                        : subject,
+                    'message': message,
+                  };
+
+                  final res = await http.post(
+                    uri,
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: jsonEncode(payload),
+                  );
+
+                  if (!ctx2.mounted) return;
+
+                  if (res.statusCode >= 200 && res.statusCode < 300) {
+                    Navigator.of(ctx2).pop();
+
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Mesajın alındı, en kısa sürede dönüş yapacağız.',
+                        ),
+                      ),
+                    );
+                  } else {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Mesaj gönderilemedi (kod: ${res.statusCode}).',
+                        ),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Mesaj gönderilemedi: $e'),
+                    ),
+                  );
+                } finally {
+                  if (!ctx2.mounted) return;
+                  setState(() => isSending = false);
+                }
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin:
+                        const EdgeInsets.only(bottom: 12, top: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const Text(
+                    'Destek Mesajı Gönder',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Mesajın direkt olarak Ermoneyt admin panelindeki '
+                    '“İletişim Mesajları” bölümüne düşecek.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white60,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  if (email.isNotEmpty)
+                    Text(
+                      'Hesap e-postası: $email',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  if (email.isNotEmpty) const SizedBox(height: 10),
+                  TextField(
+                    controller: subjectController,
+                    decoration: InputDecoration(
+                      labelText: 'Konu (opsiyonel)',
+                      labelStyle:
+                          const TextStyle(color: Colors.white60),
+                      filled: true,
+                      fillColor: const Color(0xFF0B0F17),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Colors.white24,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFFD166),
+                        ),
+                      ),
+                    ),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: messageController,
+                    maxLines: 5,
+                    decoration: InputDecoration(
+                      labelText: 'Mesajın',
+                      labelStyle:
+                          const TextStyle(color: Colors.white60),
+                      alignLabelWithHint: true,
+                      filled: true,
+                      fillColor: const Color(0xFF0B0F17),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Colors.white24,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Color(0xFFFFD166),
+                        ),
+                      ),
+                    ),
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: isSending
+                            ? null
+                            : () => Navigator.of(ctx2).pop(),
+                        child: const Text('Vazgeç'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              const Color(0xFFFFD166),
+                          foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 10,
+                          ),
+                        ),
+                        onPressed: isSending ? null : send,
+                        child: isSending
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor:
+                                      AlwaysStoppedAnimation(
+                                          Colors.black),
+                                ),
+                              )
+                            : const Text(
+                                'Gönder',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -71,7 +332,7 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // HESAP BÖLÜMÜ
+          // HESAP
           const Text(
             'Hesap',
             style: TextStyle(
@@ -118,7 +379,7 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // UYGULAMA BÖLÜMÜ
+          // UYGULAMA
           const Text(
             'Uygulama',
             style: TextStyle(
@@ -189,7 +450,7 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // DESTEK BÖLÜMÜ
+          // DESTEK
           const Text(
             'Destek',
             style: TextStyle(
@@ -216,17 +477,7 @@ class SettingsScreen extends StatelessWidget {
                     'Sorun ve önerilerin için bize yaz',
                     style: TextStyle(color: Colors.white60),
                   ),
-                  onTap: () {
-                    _showInfoDialog(
-                      context,
-                      title: 'Destek',
-                      message:
-                          'Destek e-posta adresi:\n\n'
-                          'support@ermoneyt.com\n\n'
-                          'Uygulama ile ilgili yaşadığın hataları ekran görüntüsü ile birlikte '
-                          'bu adrese gönderebilirsin.',
-                    );
-                  },
+                  onTap: () => _openSupportSheet(context),
                 ),
               ],
             ),
