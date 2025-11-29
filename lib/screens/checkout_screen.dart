@@ -244,7 +244,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                 ),
                               ),
                               subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 4),
                                   if (fullName.isNotEmpty)
@@ -760,11 +761,40 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'paymentMethod': _selectedPaymentMethod, // <<< BURASI ÖNEMLİ
       };
 
+      // Önce backend API'ye gönder
       final resp = await ApiService.createOrder(payload);
 
       if (resp['ok'] != true) {
         throw Exception(resp['error'] ?? 'ORDER_FAILED');
       }
+
+      // ---- Mobile tarafında Firestore'a users/{uid}/orders yaz ----
+      final orderId =
+          DateTime.now().millisecondsSinceEpoch.toString(); // web ile uyumlu
+
+      final orderDoc = {
+        'id': orderId,
+        'userId': uid,
+        'userEmail': email,
+        'userName': name,
+        'items': itemsList,
+        'subtotal': subtotal,
+        'shipping': shipping,
+        'total': total,
+        'paymentMethod': _selectedPaymentMethod,
+        'addressId': _selectedAddressId,
+        'address': cleanedAddress,
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      final userOrderRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('orders')
+          .doc(orderId);
+
+      await userOrderRef.set(orderDoc);
 
       // sadece sepetten geldiyse sepeti boşalt
       if (!isSingleProduct) {

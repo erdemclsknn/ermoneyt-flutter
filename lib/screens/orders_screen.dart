@@ -59,7 +59,6 @@ class OrdersScreen extends StatelessWidget {
     final dt = _toDate(v);
     if (dt == null) return '-';
     final local = dt.toLocal();
-    // yyyy-MM-dd HH:mm -> kullanıcıya yeterli
     final y = local.year.toString().padLeft(4, '0');
     final m = local.month.toString().padLeft(2, '0');
     final d = local.day.toString().padLeft(2, '0');
@@ -70,9 +69,7 @@ class OrdersScreen extends StatelessWidget {
 
   String _formatMoney(dynamic v) {
     if (v == null) return '0,00 ₺';
-    if (v is num) {
-      return '${v.toStringAsFixed(2)} ₺';
-    }
+    if (v is num) return '${v.toStringAsFixed(2)} ₺';
     try {
       final d = double.parse(v.toString());
       return '${d.toStringAsFixed(2)} ₺';
@@ -97,7 +94,7 @@ class OrdersScreen extends StatelessWidget {
             padding: EdgeInsets.all(16),
             child: Text(
               'Siparişlerini görebilmek için giriş yapmalısın.',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
+              style: TextStyle(color: Colors.white70),
               textAlign: TextAlign.center,
             ),
           ),
@@ -147,13 +144,10 @@ class OrdersScreen extends StatelessWidget {
 
           if (docs.isEmpty) {
             return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Henüz hiç siparişin yok.\nİlk siparişini şimdi oluşturabilirsin 🚀',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                  textAlign: TextAlign.center,
-                ),
+              child: Text(
+                'Henüz hiç siparişin yok.\nİlk siparişini şimdi oluşturabilirsin 🚀',
+                style: TextStyle(color: Colors.white70),
+                textAlign: TextAlign.center,
               ),
             );
           }
@@ -170,213 +164,146 @@ class OrdersScreen extends StatelessWidget {
               final total = data['total'];
               final subtotal = data['subtotal'];
               final shipping = data['shipping'];
-              final paymentMethod =
-                  (data['paymentMethod'] ?? 'Bilinmiyor').toString();
               final createdAt = data['createdAt'];
-              final shippedAt = data['shippedAt'];
               final items = (data['items'] as List<dynamic>? ?? []);
-              final address =
-                  (data['address'] as Map<String, dynamic>? ?? {});
+              final address = (data['address'] as Map<String, dynamic>? ?? {});
 
-              // ürün adedi
+              // Ürün sayısı
               int itemCount = 0;
-              for (final it in items) {
+              for (var it in items) {
                 if (it is Map) {
                   final q = it['qty'] ?? it['quantity'] ?? 1;
-                  if (q is num) {
-                    itemCount += q.toInt();
-                  } else {
-                    itemCount += 1;
-                  }
+                  itemCount += (q is num) ? q.toInt() : 1;
                 } else {
                   itemCount += 1;
                 }
               }
 
-              final statusLabel = _statusLabel(status);
-              final statusColor = _statusColor(status);
-              final createdStr = _formatDate(createdAt);
-              final shippedStr =
-                  shippedAt != null ? _formatDate(shippedAt) : null;
-
-              // Adres metni
-              final fullName =
-                  (address['fullName'] ?? address['adSoyad'] ?? '').toString();
-              final line =
-                  (address['line'] ?? address['line1'] ?? '').toString();
+              final fullName = (address['fullName'] ?? '').toString();
+              final line = (address['line'] ?? '').toString();
               final city = (address['city'] ?? '').toString();
               final district = (address['district'] ?? '').toString();
               final phone = (address['phone'] ?? '').toString();
 
-              final addressLines = <String>[];
-              if (fullName.isNotEmpty) addressLines.add(fullName);
-              if (line.isNotEmpty) addressLines.add(line);
-              if (city.isNotEmpty || district.isNotEmpty) {
-                addressLines.add('$district / $city'.trim());
-              }
-              if (phone.isNotEmpty) addressLines.add(phone);
+              final addressLines = [
+                if (fullName.isNotEmpty) fullName,
+                if (line.isNotEmpty) line,
+                if (district.isNotEmpty || city.isNotEmpty)
+                  '$district / $city',
+                if (phone.isNotEmpty) phone,
+              ];
 
               return Card(
                 color: const Color(0xFF131822),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: const BorderSide(color: Colors.white10),
                 ),
-                margin: const EdgeInsets.only(bottom: 12),
-                child: Theme(
-                  data: Theme.of(context).copyWith(
-                    dividerColor: Colors.white10,
-                    listTileTheme: const ListTileThemeData(
-                      iconColor: Colors.white70,
-                    ),
-                  ),
-                  child: ExpansionTile(
-                    tilePadding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                    childrenPadding:
-                        const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Sipariş #$id',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatMoney(total),
-                          style: const TextStyle(
-                            color: Color(0xFFFFD166),
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              statusLabel,
-                              style: TextStyle(
-                                color: statusColor,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              createdStr,
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 11,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                margin: const EdgeInsets.only(bottom: 14),
+                child: ExpansionTile(
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+                  childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                  title: Row(
                     children: [
-                      const SizedBox(height: 8),
-                      // Ürün sayısı, ödeme yöntemi
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '$itemCount ürün',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            'Ödeme: $paymentMethod',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Toplamlar
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Ürünler: ${_formatMoney(subtotal)}',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            'Kargo: ${_formatMoney(shipping)}',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Align(
-                        alignment: Alignment.centerRight,
+                      Expanded(
                         child: Text(
-                          'Genel Toplam: ${_formatMoney(total)}',
+                          'Sipariş #$id',
                           style: const TextStyle(
-                            color: Color(0xFFFFD166),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(height: 10),
-
-                      // Adres
-                      if (addressLines.isNotEmpty) ...[
-                        const Text(
-                          'Teslimat adresi',
+                      Text(
+                        _formatMoney(total),
+                        style: const TextStyle(
+                          color: Color(0xFFFFD166),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Row(
+                    children: [
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _statusColor(status).withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          _statusLabel(status),
                           style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
+                            color: _statusColor(status),
+                            fontSize: 11,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          addressLines.join('\n'),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _formatDate(createdAt),
                           style: const TextStyle(
                             color: Colors.white60,
-                            fontSize: 12,
+                            fontSize: 11,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 10),
-                      ],
+                      ),
+                    ],
+                  ),
+                  children: [
+                    const SizedBox(height: 8),
 
-                      // Ürün listesi
+                    // Ürün sayısı – ödeme
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '$itemCount ürün',
+                          style:
+                              const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Ara toplam – kargo – genel toplam
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Ürünler: ${_formatMoney(subtotal)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                        Text(
+                          'Kargo: ${_formatMoney(shipping)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Genel Toplam: ${_formatMoney(total)}',
+                        style: const TextStyle(
+                          color: Color(0xFFFFD166),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Adres
+                    if (addressLines.isNotEmpty) ...[
                       const Text(
-                        'Ürünler',
+                        'Teslimat adresi',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 12,
@@ -384,94 +311,104 @@ class OrdersScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      ...items.map((it) {
-                        if (it is! Map) return const SizedBox.shrink();
-                        final name = (it['name'] ?? '').toString();
-                        final qty = (it['qty'] ?? it['quantity'] ?? 1);
-                        final price = it['price'];
-                        final image = (it['image'] ?? '').toString();
+                      Text(
+                        addressLines.join('\n'),
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
 
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(
-                            children: [
-                              if (image.isNotEmpty)
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.network(
-                                    image,
+                    // Ürünler listesi
+                    const Text(
+                      'Ürünler',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    ...items.map((it) {
+                      if (it is! Map) return const SizedBox.shrink();
+
+                      final name = it['name'] ?? '';
+                      final qty = it['qty'] ?? it['quantity'] ?? 1;
+                      final price = it['price'];
+                      final image = (it['image'] ?? '').toString();
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            // --- BOZUK RESİM ENGELLEYEN KISIM ---
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                image,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
                                     width: 40,
                                     height: 40,
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              else
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(8),
-                                    color: const Color(0xFF1F2937),
-                                  ),
-                                  child: const Icon(
-                                    Icons.shopping_bag_outlined,
-                                    color: Colors.white38,
-                                    size: 20,
-                                  ),
-                                ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      name,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                      ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1F2937),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Adet: $qty',
-                                      style: const TextStyle(
-                                        color: Colors.white60,
-                                        fontSize: 11,
-                                      ),
+                                    child: const Icon(
+                                      Icons.broken_image_outlined,
+                                      color: Colors.white38,
+                                      size: 20,
                                     ),
-                                  ],
-                                ),
+                                  );
+                                },
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _formatMoney(price),
-                                style: const TextStyle(
-                                  color: Color(0xFFFFD166),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
+                            ),
+                            const SizedBox(width: 10),
 
-                      if (shippedStr != null &&
-                          shippedStr.trim().isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          'Kargoya verildi: $shippedStr',
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 11,
-                          ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    name.toString(),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Adet: $qty',
+                                    style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            Text(
+                              _formatMoney(price),
+                              style: const TextStyle(
+                                color: Color(0xFFFFD166),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ],
-                  ),
+                      );
+                    }).toList(),
+                  ],
                 ),
               );
             },

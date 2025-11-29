@@ -9,6 +9,7 @@ import 'favorites_screen.dart';
 import 'address_list_screen.dart';
 import 'cart_screen.dart';
 import 'settings_screen.dart';
+import 'orders_screen.dart';
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -37,7 +38,7 @@ class _AccountScreenState extends State<AccountScreen> {
     super.dispose();
   }
 
-  // ----------------- FORM İŞLEMLERİ -----------------
+  // ----------------- GİRİŞ & ÜYELİK -----------------
 
   Future<void> _submitEmailForm() async {
     if (!_formKey.currentState!.validate()) return;
@@ -90,7 +91,7 @@ class _AccountScreenState extends State<AccountScreen> {
     await _authService.signOut();
   }
 
-  // ----------------- WIDGET YARDIMCILARI -----------------
+  // ----------------- FORM WIDGET -----------------
 
   Widget _field({
     required TextEditingController controller,
@@ -125,6 +126,8 @@ class _AccountScreenState extends State<AccountScreen> {
     );
   }
 
+  // ----------------- ALTINKAP PROMO -----------------
+
   Widget _altinkapPromoCard() {
     return Card(
       color: const Color(0xFF171C27),
@@ -149,10 +152,10 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
+            const Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
+                children: [
                   Text(
                     'AltınKap Oyunları',
                     style: TextStyle(
@@ -171,8 +174,8 @@ class _AccountScreenState extends State<AccountScreen> {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            const Text(
+            SizedBox(width: 12),
+            Text(
               'Hemen Dene',
               style: TextStyle(
                 color: Color(0xFFFFD166),
@@ -185,6 +188,10 @@ class _AccountScreenState extends State<AccountScreen> {
       ),
     );
   }
+
+  // ============================================================
+  //                          BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -231,7 +238,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Giriş / Üye Ol toggle
+                  // LOGIN/REGISTER TOGGLE
                   Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
@@ -242,8 +249,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       children: [
                         Expanded(
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _isLoginMode = true),
+                            onTap: () => setState(() => _isLoginMode = true),
                             child: Container(
                               height: 40,
                               alignment: Alignment.center,
@@ -267,8 +273,7 @@ class _AccountScreenState extends State<AccountScreen> {
                         ),
                         Expanded(
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _isLoginMode = false),
+                            onTap: () => setState(() => _isLoginMode = false),
                             child: Container(
                               height: 40,
                               alignment: Alignment.center,
@@ -293,6 +298,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ],
                     ),
                   ),
+
                   const SizedBox(height: 16),
 
                   if (_error != null)
@@ -300,7 +306,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red),
+                        style: const TextStyle(color: Colors.redAccent),
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -360,8 +366,7 @@ class _AccountScreenState extends State<AccountScreen> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFFFFD166),
                               foregroundColor: Colors.black,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
@@ -388,18 +393,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
 
                   const SizedBox(height: 20),
-                  Row(
-                    children: const [
+                  const Row(
+                    children: [
                       Expanded(child: Divider(color: Colors.white24)),
                       SizedBox(width: 8),
-                      Text(
-                        'veya',
-                        style: TextStyle(color: Colors.white70),
-                      ),
+                      Text('veya', style: TextStyle(color: Colors.white70)),
                       SizedBox(width: 8),
                       Expanded(child: Divider(color: Colors.white24)),
                     ],
                   ),
+
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -430,8 +433,9 @@ class _AccountScreenState extends State<AccountScreen> {
         }
 
         // =====================================================
-        //                     GİRİŞ YAPILMIŞ
+        //                 GİRİŞ YAPILMIŞ
         // =====================================================
+
         final cart = context.watch<CartProvider>();
         final itemCount = cart.items.length;
         final cartTotal = cart.totalAmount;
@@ -451,11 +455,14 @@ class _AccountScreenState extends State<AccountScreen> {
               // ÜST PROFİL BLOĞU
               Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 20),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF1C2535), Color(0xFF0B0F17)],
+                    colors: [
+                      Color(0xFF1C2535),
+                      Color(0xFF0B0F17),
+                    ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -514,6 +521,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+
                     Card(
                       color: const Color(0xFF131822),
                       shape: RoundedRectangleBorder(
@@ -550,8 +558,10 @@ class _AccountScreenState extends State<AccountScreen> {
                               );
                             },
                           ),
+
                           const Divider(height: 1, color: Colors.white10),
-                          // SİPARİŞLERİM
+
+                          // ⭐ SİPARİŞLERİM (NAVIGATOR DOĞRUDAN GÖNDERİR)
                           ListTile(
                             leading: const Icon(
                               Icons.shopping_bag_outlined,
@@ -562,18 +572,23 @@ class _AccountScreenState extends State<AccountScreen> {
                               'Geçmiş ve güncel siparişlerin',
                               style: TextStyle(color: Colors.white60),
                             ),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white38,
+                            ),
                             onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Siparişlerim ekranı daha sonra eklenecek.',
-                                  ),
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const OrdersScreen(),
                                 ),
                               );
                             },
                           ),
+
                           const Divider(height: 1, color: Colors.white10),
-                          // FAVORİLERİM
+
+                          // FAVORİLER
                           ListTile(
                             leading: const Icon(
                               Icons.favorite_border,
@@ -584,6 +599,10 @@ class _AccountScreenState extends State<AccountScreen> {
                               'Beğendiğin ürünleri burada gör',
                               style: TextStyle(color: Colors.white60),
                             ),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white38,
+                            ),
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -593,8 +612,10 @@ class _AccountScreenState extends State<AccountScreen> {
                               );
                             },
                           ),
+
                           const Divider(height: 1, color: Colors.white10),
-                          // ADRESLERİM
+
+                          // ADRESLER
                           ListTile(
                             leading: const Icon(
                               Icons.location_on_outlined,
@@ -605,11 +626,16 @@ class _AccountScreenState extends State<AccountScreen> {
                               'Teslimat adreslerini yönet',
                               style: TextStyle(color: Colors.white60),
                             ),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white38,
+                            ),
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => const AddressListScreen(),
+                                  builder: (_) =>
+                                      const AddressListScreen(),
                                 ),
                               );
                             },
@@ -628,6 +654,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+
                     Card(
                       color: const Color(0xFF131822),
                       shape: RoundedRectangleBorder(
@@ -641,6 +668,10 @@ class _AccountScreenState extends State<AccountScreen> {
                               color: Color(0xFFFFD166),
                             ),
                             title: const Text('Ayarlar'),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white38,
+                            ),
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -650,7 +681,9 @@ class _AccountScreenState extends State<AccountScreen> {
                               );
                             },
                           ),
+
                           const Divider(height: 1, color: Colors.white10),
+
                           ListTile(
                             leading: const Icon(
                               Icons.logout,
