@@ -46,8 +46,9 @@ class ApiService {
 
       final banners = data
           .map((e) => BannerModel.fromJson(e))
-          .where((b) =>
-              b.isActive && (b.place == 'mobile' || b.place == 'both'))
+          .where(
+            (b) => b.isActive && (b.place == 'mobile' || b.place == 'both'),
+          )
           .toList();
 
       banners.sort((a, b) => a.order.compareTo(b.order));
@@ -55,5 +56,25 @@ class ApiService {
     } else {
       throw Exception('Bannerlar alınamadı: ${res.statusCode}');
     }
+  }
+
+  /* -------------------- SİPARİŞ OLUŞTURMA -------------------- */
+
+  static Future<Map<String, dynamic>> createOrder(
+      Map<String, dynamic> payload) async {
+    final uri = Uri.parse('$baseUrl/api/orders');
+
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('Sipariş isteği başarısız: HTTP ${res.statusCode}');
+    }
+
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data;
   }
 }

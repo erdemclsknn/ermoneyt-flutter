@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../providers/cart_provider.dart';
 import 'account_screen.dart';
+import '../services/api_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
   /// İstersen tek ürün için de kullanabilirsin:
@@ -29,6 +30,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Map<String, dynamic>? _selectedAddressData;
   bool _saving = false;
   String? _error;
+
+  // ödeme yöntemi (web tarafındaki gibi)
+  // cod_cash   = kapıda nakit
+  // cod_card   = kapıda POS ile kart
+  // online_card = kredi/banka kartı (online)
+  String _selectedPaymentMethod = 'cod_cash';
 
   // KARGO KURALI
   static const double _freeShippingThreshold = 350.0; // 350 TL ve üzeri ücretsiz
@@ -284,7 +291,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
                   const SizedBox(height: 24),
 
-                  // ---------------- ÖDEME YÖNTEMİ (ŞİMDİLİK DEMO) ----------------
+                  // ---------------- ÖDEME YÖNTEMİ ----------------
                   const Text(
                     'Ödeme Yöntemi',
                     style: TextStyle(
@@ -294,22 +301,77 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF131822),
+                  Card(
+                    color: const Color(0xFF131822),
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white10),
+                      side: const BorderSide(color: Colors.white10),
                     ),
-                    child: const Text(
-                      'Şimdilik demo ekranıdır.\n'
-                      'Buraya kredi kartı / havale / kapıda ödeme seçenekleri gelecek.',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        height: 1.4,
-                      ),
+                    child: Column(
+                      children: [
+                        RadioListTile<String>(
+                          value: 'cod_cash',
+                          groupValue: _selectedPaymentMethod,
+                          activeColor: const Color(0xFFFFD166),
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() => _selectedPaymentMethod = val);
+                          },
+                          title: const Text(
+                            'Kapıda Nakit Ödeme',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          subtitle: const Text(
+                            'Teslimat sırasında nakit olarak öde.',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, color: Colors.white12),
+                        RadioListTile<String>(
+                          value: 'cod_card',
+                          groupValue: _selectedPaymentMethod,
+                          activeColor: const Color(0xFFFFD166),
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() => _selectedPaymentMethod = val);
+                          },
+                          title: const Text(
+                            'Kapıda Kart ile Ödeme',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          subtitle: const Text(
+                            'Kurye POS cihazı ile karttan çekim yapar.',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, color: Colors.white12),
+                        RadioListTile<String>(
+                          value: 'online_card',
+                          groupValue: _selectedPaymentMethod,
+                          activeColor: const Color(0xFFFFD166),
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() => _selectedPaymentMethod = val);
+                          },
+                          title: const Text(
+                            'Kredi / Banka Kartı (Online)',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          subtitle: const Text(
+                            '3D Secure ile güvenli online ödeme.',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
 
@@ -649,8 +711,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
 
     try {
-      final firestore = FirebaseFirestore.instance;
-      final orderRef = firestore.collection('orders').doc();
+      final user = FirebaseAuth.instance.currentUser;
+      final email = user?.email ?? '';
+      final name = user?.displayName ?? '';
+
+      // adres içinden timestamp vs çıkar
+      final cleanedAddress = Map<String, dynamic>.from(addressData);
+      cleanedAddress.remove('createdAt');
+      cleanedAddress.remove('updatedAt');
 
       // Sipariş ürün listesi
       late final List<Map<String, dynamic>> itemsList;
@@ -680,34 +748,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }).toList();
       }
 
-      final now = FieldValue.serverTimestamp();
-
-      final orderData = {
-        'id': orderRef.id,
+      final payload = {
         'userId': uid,
-        'status': 'pending', // ilk durum
+        'userEmail': email,
+        'userName': name,
+        'address': cleanedAddress,
+        'items': itemsList,
         'subtotal': subtotal,
         'shipping': shipping,
         'total': total,
-        'items': itemsList,
-        'address': addressData,
-        'paymentMethod': 'kapida_odeme', // şimdilik
-        'createdAt': now,
-        'updatedAt': now,
+        'paymentMethod': _selectedPaymentMethod, // <<< BURASI ÖNEMLİ
       };
 
-      // 1) Genel orders koleksiyonu (admin panel için)
-      await orderRef.set(orderData);
+      final resp = await ApiService.createOrder(payload);
 
-      // 2) Kullanıcıya özel orders alt koleksiyonu (istersen kullanırsın)
-      await firestore
-          .collection('users')
-          .doc(uid)
-          .collection('orders')
-          .doc(orderRef.id)
-          .set(orderData);
+      if (resp['ok'] != true) {
+        throw Exception(resp['error'] ?? 'ORDER_FAILED');
+      }
 
-      // 3) Sepeti sadece sepetten geldiyse temizle
+      // sadece sepetten geldiyse sepeti boşalt
       if (!isSingleProduct) {
         cart.clear();
       }
