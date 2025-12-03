@@ -13,6 +13,7 @@ class AddressAddScreen extends StatefulWidget {
 class _AddressAddScreenState extends State<AddressAddScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  final _titleCtrl = TextEditingController();        // Adres başlığı
   final _fullnameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
@@ -26,6 +27,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
 
   @override
   void dispose() {
+    _titleCtrl.dispose();
     _fullnameCtrl.dispose();
     _phoneCtrl.dispose();
     _cityCtrl.dispose();
@@ -93,6 +95,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
 
       await ref.set({
         'id': ref.id,
+        'title': _titleCtrl.text.trim(),          // web ile uyumlu adres başlığı
         'fullName': _fullnameCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
         'city': _cityCtrl.text.trim(),
@@ -133,6 +136,15 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Adres Başlığı (web ile aynı mantıkta)
+              _field(
+                controller: _titleCtrl,
+                label: 'Adres Başlığı (Örn: Ev, İş)',
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? 'Adres başlığı girin' : null,
+              ),
+              const SizedBox(height: 12),
+
               _field(
                 controller: _fullnameCtrl,
                 label: 'Ad Soyad',
@@ -140,6 +152,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                     (v == null || v.isEmpty) ? 'Ad soyad girin' : null,
               ),
               const SizedBox(height: 12),
+
               _field(
                 controller: _phoneCtrl,
                 label: 'Telefon Numarası',
@@ -148,6 +161,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                     (v == null || v.isEmpty) ? 'Telefon girin' : null,
               ),
               const SizedBox(height: 12),
+
               Row(
                 children: [
                   Expanded(
@@ -170,6 +184,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                 ],
               ),
               const SizedBox(height: 12),
+
               _field(
                 controller: _neighborhoodCtrl,
                 label: 'Mahalle',
@@ -177,6 +192,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                     (v == null || v.isEmpty) ? 'Mahalle girin' : null,
               ),
               const SizedBox(height: 12),
+
               _field(
                 controller: _streetCtrl,
                 label: 'Sokak / Cadde',
@@ -184,6 +200,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                     (v == null || v.isEmpty) ? 'Sokak girin' : null,
               ),
               const SizedBox(height: 12),
+
               Row(
                 children: [
                   Expanded(
@@ -197,15 +214,17 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                   Expanded(
                     child: _field(
                       controller: _lineCtrl,
-                      label: 'Adres Satırı',
+                      label: 'Adres Satırı (Bina / Daire / Not)',
                       maxLines: 1,
-                      validator: (v) =>
-                          (v == null || v.isEmpty) ? 'Adres satırı girin' : null,
+                      validator: (v) => (v == null || v.isEmpty)
+                          ? 'Adres satırı girin'
+                          : null,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 24),
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

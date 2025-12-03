@@ -113,8 +113,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     // Description içindeki <img src="..."> leri yakala
     final desc = p.description ?? '';
     if (desc.isNotEmpty) {
-      final exp =
-          RegExp(r'<img[^>]+src="([^"]+)"', caseSensitive: false);
+      final exp = RegExp(r'<img[^>]+src="([^"]+)"', caseSensitive: false);
       for (final m in exp.allMatches(desc)) {
         addOne(m.group(1));
       }
@@ -264,17 +263,30 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   _PriceCard(product: p, qty: _qty),
                   const SizedBox(height: 14),
 
-                  // Adet
+                  // Adet + stok bilgisi
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Adet',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                      Row(
+                        children: [
+                          const Text(
+                            'Adet',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(width: 12),
+                          _QtyPicker(
+                            value: _qty,
+                            max: p.stock > 0 ? p.stock : 1,
+                            onChanged: (v) => setState(() => _qty = v),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      _QtyPicker(
-                        value: _qty,
-                        onChanged: (v) => setState(() => _qty = v),
+                      Text(
+                        'Stok: ${p.stock}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
@@ -835,8 +847,13 @@ class _PriceCard extends StatelessWidget {
 
 class _QtyPicker extends StatelessWidget {
   final int value;
+  final int max; // stok limiti
   final ValueChanged<int> onChanged;
-  const _QtyPicker({required this.value, required this.onChanged});
+  const _QtyPicker({
+    required this.value,
+    required this.max,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -863,13 +880,16 @@ class _QtyPicker extends StatelessWidget {
               ),
             ),
           ),
-          _btn(Icons.add, () => onChanged(value + 1)),
+          _btn(
+            Icons.add,
+            value < max ? () => onChanged(value + 1) : null,
+          ),
         ],
       ),
     );
   }
 
-  Widget _btn(IconData icon, VoidCallback onTap) => InkWell(
+  Widget _btn(IconData icon, VoidCallback? onTap) => InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
@@ -1026,6 +1046,11 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool inStock = (product.stock > 0) &&
+        !((product.availability ?? '')
+            .toLowerCase()
+            .contains('out'));
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
       decoration: const BoxDecoration(
@@ -1049,20 +1074,40 @@ class _BottomBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
           ),
-          onPressed: () {
-            final cart = context.read<CartProvider>();
-            for (int i = 0; i < qty; i++) {
-              cart.addToCart(product);
-            }
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Sepete eklendi: $qty adet'),
-              ),
-            );
-          },
-          child: const Text(
-            'Sepete ekle',
-            style: TextStyle(
+          onPressed: !inStock
+              ? null
+              : () {
+                  final cart = context.read<CartProvider>();
+
+                  // Güvenlik: qty stok üstüne çıkmasın
+                  int addQty = qty;
+                  if (addQty > product.stock) {
+                    addQty = product.stock;
+                  }
+
+                  if (addQty <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content:
+                            Text('Bu ürün şu anda stokta yok.'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  for (int i = 0; i < addQty; i++) {
+                    cart.addToCart(product);
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content:
+                          Text('Sepete eklendi: $addQty adet'),
+                    ),
+                  );
+                },
+          child: Text(
+            !inStock ? 'Tükendi' : 'Sepete ekle',
+            style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 16,
             ),
