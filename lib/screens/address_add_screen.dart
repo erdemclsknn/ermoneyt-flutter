@@ -16,6 +16,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
   final _titleCtrl = TextEditingController();        // Adres başlığı
   final _fullnameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _tcCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _districtCtrl = TextEditingController();
   final _neighborhoodCtrl = TextEditingController();
@@ -30,6 +31,7 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
     _titleCtrl.dispose();
     _fullnameCtrl.dispose();
     _phoneCtrl.dispose();
+    _tcCtrl.dispose();
     _cityCtrl.dispose();
     _districtCtrl.dispose();
     _neighborhoodCtrl.dispose();
@@ -93,18 +95,45 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
           .collection('addresses')
           .doc();
 
+      final title = _titleCtrl.text.trim().isEmpty
+          ? 'Adres'
+          : _titleCtrl.text.trim();
+
+      final fullName = _fullnameCtrl.text.trim();
+      final phone = _phoneCtrl.text.trim();
+      final tc = _tcCtrl.text.trim();
+      final city = _cityCtrl.text.trim();
+      final district = _districtCtrl.text.trim();
+      final neighborhood = _neighborhoodCtrl.text.trim();
+      final street = _streetCtrl.text.trim();
+      final postalCode = _zipCtrl.text.trim();
+      final extraLine = _lineCtrl.text.trim();
+
+      // line1 = mahalle + sokak + ekstra adres satırı
+      final line1Parts = <String>[
+        neighborhood,
+        street,
+        extraLine,
+      ].where((e) => e.isNotEmpty).toList();
+
+      final line1 = line1Parts.join(' ');
+
       await ref.set({
         'id': ref.id,
-        'title': _titleCtrl.text.trim(),          // web ile uyumlu adres başlığı
-        'fullName': _fullnameCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
-        'city': _cityCtrl.text.trim(),
-        'district': _districtCtrl.text.trim(),
-        'neighborhood': _neighborhoodCtrl.text.trim(),
-        'street': _streetCtrl.text.trim(),
-        'zipCode': _zipCtrl.text.trim(),
-        'line1': _lineCtrl.text.trim(),
+        'title': title,                 // web ile uyumlu adres başlığı
+        'fullName': fullName,
+        'phone': phone,
+        'tc': tc,                       // web tarafındaki tc ile aynı alan
+        'city': city,
+        'district': district,
+        'neighborhood': neighborhood,   // ekstra detay, web isterse kullanır
+        'street': street,               // ekstra detay
+        'line1': line1,                 // web tarafı bunu ana adres satırı olarak okuyor
+        'postalCode': postalCode,       // web: postalCode || zipCode diye okuyor, artık direkt postalCode
+        'country': 'Türkiye',
+        'isDefault': false,             // mobilde şimdilik varsayılan seçimi yok
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
@@ -159,6 +188,21 @@ class _AddressAddScreenState extends State<AddressAddScreen> {
                 type: TextInputType.phone,
                 validator: (v) =>
                     (v == null || v.isEmpty) ? 'Telefon girin' : null,
+              ),
+              const SizedBox(height: 12),
+
+              _field(
+                controller: _tcCtrl,
+                label: 'TC Kimlik Numarası',
+                type: TextInputType.number,
+                validator: (v) {
+                  final val = v?.trim() ?? '';
+                  if (val.isEmpty) return 'TC Kimlik numarası zorunludur';
+                  if (val.length != 11 || int.tryParse(val) == null) {
+                    return 'TC Kimlik numarası 11 haneli olmalıdır';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
 

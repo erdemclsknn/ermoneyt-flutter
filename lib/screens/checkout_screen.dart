@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/product.dart';
 import '../providers/cart_provider.dart';
@@ -31,15 +32,33 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _saving = false;
   String? _error;
 
-  // ödeme yöntemi (web tarafındaki gibi)
-  // cod_cash   = kapıda nakit
-  // cod_card   = kapıda POS ile kart
-  // online_card = kredi/banka kartı (online)
-  String _selectedPaymentMethod = 'cod_cash';
+  // Sadece online kart (Shopier) kullanıyoruz
+  String _selectedPaymentMethod = 'online_card';
 
   // KARGO KURALI
   static const double _freeShippingThreshold = 350.0; // 350 TL ve üzeri ücretsiz
   static const double _shippingFeeUnderThreshold = 100.0; // altına 100 TL
+
+  // ---------- Firestore'daki sepeti temizle ----------
+  Future<void> _clearRemoteCart(String uid) async {
+    try {
+      final col = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('cart');
+
+      final snap = await col.get();
+      if (snap.docs.isEmpty) return;
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final d in snap.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('clearRemoteCart error: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -203,15 +222,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           final title =
                               (data['title'] ?? 'Adres').toString();
                           final fullName =
-                              (data['fullName'] ?? '').toString();
+                              (data['fullName'] ?? data['name'] ?? '')
+                                  .toString();
                           final phone =
-                              (data['phone'] ?? '').toString();
-                          final line =
-                              (data['line'] ?? '').toString();
+                              (data['phone'] ?? data['phoneNumber'] ?? '')
+                                  .toString();
+
+                          // web + mobil ile uyumlu address satırları
+                          final line1 = (data['line1'] ??
+                                  data['addressLine'] ??
+                                  data['line'] ??
+                                  '')
+                              .toString();
+                          final line2 = (data['line2'] ??
+                                  data['addressLine2'] ??
+                                  '')
+                              .toString();
                           final city =
-                              (data['city'] ?? '').toString();
-                          final district =
-                              (data['district'] ?? '').toString();
+                              (data['city'] ?? data['cityName'] ?? '')
+                                  .toString();
+                          final district = (data['district'] ??
+                                  data['districtName'] ??
+                                  '')
+                              .toString();
 
                           final isSelected = _selectedAddressId == id;
 
@@ -256,9 +289,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                         fontSize: 12,
                                       ),
                                     ),
-                                  if (line.isNotEmpty)
+                                  if (line1.isNotEmpty)
                                     Text(
-                                      line,
+                                      line1,
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  if (line2.isNotEmpty)
+                                    Text(
+                                      line2,
                                       style: const TextStyle(
                                         color: Colors.white70,
                                         fontSize: 12,
@@ -308,71 +349,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       borderRadius: BorderRadius.circular(16),
                       side: const BorderSide(color: Colors.white10),
                     ),
-                    child: Column(
-                      children: [
-                        RadioListTile<String>(
-                          value: 'cod_cash',
-                          groupValue: _selectedPaymentMethod,
-                          activeColor: const Color(0xFFFFD166),
-                          onChanged: (val) {
-                            if (val == null) return;
-                            setState(() => _selectedPaymentMethod = val);
-                          },
-                          title: const Text(
-                            'Kapıda Nakit Ödeme',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          subtitle: const Text(
-                            'Teslimat sırasında nakit olarak öde.',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
+                    child: RadioListTile<String>(
+                      value: 'online_card',
+                      groupValue: _selectedPaymentMethod,
+                      activeColor: const Color(0xFFFFD166),
+                      onChanged: (val) {
+                        if (val == null) return;
+                        setState(() => _selectedPaymentMethod = val);
+                      },
+                      title: const Text(
+                        'Kredi / Banka Kartı (Online)',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      subtitle: const Text(
+                        'Shopier ile güvenli online ödeme.',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
                         ),
-                        const Divider(height: 1, color: Colors.white12),
-                        RadioListTile<String>(
-                          value: 'cod_card',
-                          groupValue: _selectedPaymentMethod,
-                          activeColor: const Color(0xFFFFD166),
-                          onChanged: (val) {
-                            if (val == null) return;
-                            setState(() => _selectedPaymentMethod = val);
-                          },
-                          title: const Text(
-                            'Kapıda Kart ile Ödeme',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          subtitle: const Text(
-                            'Kurye POS cihazı ile karttan çekim yapar.',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Colors.white12),
-                        RadioListTile<String>(
-                          value: 'online_card',
-                          groupValue: _selectedPaymentMethod,
-                          activeColor: const Color(0xFFFFD166),
-                          onChanged: (val) {
-                            if (val == null) return;
-                            setState(() => _selectedPaymentMethod = val);
-                          },
-                          title: const Text(
-                            'Kredi / Banka Kartı (Online)',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                          subtitle: const Text(
-                            '3D Secure ile güvenli online ödeme.',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
 
@@ -694,6 +689,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
+  // ------------- SHOPIER ÖDEME SAYFASINI AÇMA -------------
+  Future<void> _openShopierPayment(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      if (!await canLaunchUrl(uri)) {
+        throw Exception('cannot_launch');
+      }
+
+      await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.'),
+        ),
+      );
+    }
+  }
+
   // ------------- SİPARİŞ OLUŞTURMA -------------
   Future<void> _createOrder({
     required String uid,
@@ -749,63 +767,64 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }).toList();
       }
 
+      // web ile aynı: online_card -> card_online
+      final apiPaymentMethod =
+          _selectedPaymentMethod == 'online_card'
+              ? 'card_online'
+              : _selectedPaymentMethod;
+
       final payload = {
         'userId': uid,
         'userEmail': email,
         'userName': name,
+        'addressId': _selectedAddressId,
         'address': cleanedAddress,
         'items': itemsList,
         'subtotal': subtotal,
         'shipping': shipping,
         'total': total,
-        'paymentMethod': _selectedPaymentMethod, // <<< BURASI ÖNEMLİ
+        'paymentMethod': apiPaymentMethod,
       };
 
-      // Önce backend API'ye gönder
+      // /api/orders çağrısı
       final resp = await ApiService.createOrder(payload);
 
-      if (resp['ok'] != true) {
+      if (resp['ok'] != true ||
+          resp['order'] == null ||
+          resp['order']['id'] == null) {
         throw Exception(resp['error'] ?? 'ORDER_FAILED');
       }
 
-      // ---- Mobile tarafında Firestore'a users/{uid}/orders yaz ----
-      final orderId =
-          DateTime.now().millisecondsSinceEpoch.toString(); // web ile uyumlu
+      final String orderId = resp['order']['id'].toString();
+      final String? paymentUrl =
+          resp['paymentUrl']?.toString();
 
-      final orderDoc = {
-        'id': orderId,
-        'userId': uid,
-        'userEmail': email,
-        'userName': name,
-        'items': itemsList,
-        'subtotal': subtotal,
-        'shipping': shipping,
-        'total': total,
-        'paymentMethod': _selectedPaymentMethod,
-        'addressId': _selectedAddressId,
-        'address': cleanedAddress,
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-      };
-
-      final userOrderRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('orders')
-          .doc(orderId);
-
-      await userOrderRef.set(orderDoc);
-
-      // sadece sepetten geldiyse sepeti boşalt
+      // 🔥 Sipariş başarıyla oluştu → hem Firestore sepetini hem
+      // lokal CartProvider sepetini temizle
+      await _clearRemoteCart(uid);
       if (!isSingleProduct) {
         cart.clear();
       }
 
       if (!mounted) return;
 
+      if (_selectedPaymentMethod == 'online_card') {
+        if (paymentUrl == null || paymentUrl.isEmpty) {
+          throw Exception('NO_PAYMENT_URL');
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ödeme sayfasına yönlendiriliyorsun...'),
+          ),
+        );
+
+        await _openShopierPayment(paymentUrl);
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Siparişin alındı, teşekkürler!'),
+        SnackBar(
+          content: Text('Siparişin alındı (No: $orderId), teşekkürler!'),
         ),
       );
 

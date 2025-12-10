@@ -10,6 +10,7 @@ import 'address_list_screen.dart';
 import 'cart_screen.dart';
 import 'settings_screen.dart';
 import 'orders_screen.dart';
+import 'returns_screen.dart'; // 🆕 İadelerim ekranı
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -561,7 +562,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
                           const Divider(height: 1, color: Colors.white10),
 
-                          // ⭐ SİPARİŞLERİM (NAVIGATOR DOĞRUDAN GÖNDERİR)
+                          // SİPARİŞLERİM
                           ListTile(
                             leading: const Icon(
                               Icons.shopping_bag_outlined,
@@ -581,6 +582,33 @@ class _AccountScreenState extends State<AccountScreen> {
                                 context,
                                 MaterialPageRoute(
                                   builder: (_) => const OrdersScreen(),
+                                ),
+                              );
+                            },
+                          ),
+
+                          const Divider(height: 1, color: Colors.white10),
+
+                          // 🆕 İADELERİM
+                          ListTile(
+                            leading: const Icon(
+                              Icons.undo_rounded,
+                              color: Color(0xFFFFD166),
+                            ),
+                            title: const Text('İadelerim'),
+                            subtitle: const Text(
+                              'İade ve değişim taleplerini görüntüle',
+                              style: TextStyle(color: Colors.white60),
+                            ),
+                            trailing: const Icon(
+                              Icons.chevron_right,
+                              color: Colors.white38,
+                            ),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ReturnsScreen(),
                                 ),
                               );
                             },

@@ -1,7 +1,14 @@
 // lib/screens/orders_screen.dart
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+
+// TODO: Burayı kendi API domainine göre güncelle.
+// Örneğin: "https://api.ermoneyt.com/api" ya da "https://ermoneyt.com/api"
+const String kApiBaseUrl = 'https://ermoneyt.com/api';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -75,6 +82,143 @@ class OrdersScreen extends StatelessWidget {
       return '${d.toStringAsFixed(2)} ₺';
     } catch (_) {
       return '0,00 ₺';
+    }
+  }
+
+  Future<void> _sendCancelRequest(
+    BuildContext context, {
+    required String orderId,
+    required String userId,
+  }) async {
+    try {
+      final uri = Uri.parse('$kApiBaseUrl/orders/$orderId/cancel');
+      final res = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'userId': userId}),
+      );
+
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('İptal talebin oluşturuldu.'),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'İptal talebi gönderilemedi (${res.statusCode}).',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('İptal talebi sırasında hata: $e'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _sendReturnRequest(
+    BuildContext context, {
+    required String orderId,
+    required String userId,
+  }) async {
+    final cargoController = TextEditingController();
+
+    final cargoCode = await showDialog<String?>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF131822),
+          title: const Text(
+            'İade talebi',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'İstersen kargo takip numaranı gir.\n'
+                'Boş bırakırsan sadece iade talebi oluşturulur, kodu sonra ekleyebilirsin.',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: cargoController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Kargo takip kodu (opsiyonel)',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFFFFD166)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Vazgeç'),
+            ),
+            TextButton(
+              onPressed: () =>
+                  Navigator.of(ctx).pop(cargoController.text.trim()),
+              child: const Text('Gönder'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (cargoCode == null) {
+      // Vazgeçildi
+      return;
+    }
+
+    try {
+      final uri = Uri.parse('$kApiBaseUrl/orders/$orderId/return');
+      final body = <String, dynamic>{
+        'userId': userId,
+      };
+      if (cargoCode.isNotEmpty) {
+        body['cargoCode'] = cargoCode;
+      }
+
+      final res = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('İade talebin oluşturuldu.'),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'İade talebi gönderilemedi (${res.statusCode}).',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('İade talebi sırasında hata: $e'),
+        ),
+      );
     }
   }
 
@@ -168,6 +312,20 @@ class OrdersScreen extends StatelessWidget {
               final items = (data['items'] as List<dynamic>? ?? []);
               final address = (data['address'] as Map<String, dynamic>? ?? {});
 
+              final cancelRequested = data['cancelRequested'] == true;
+              final cancelStatus =
+                  (data['cancelRequestStatus'] ?? '').toString();
+              final returnRequested = data['returnRequested'] == true;
+              final returnStatus =
+                  (data['returnRequestStatus'] ?? '').toString();
+
+              // Hangi durumlarda buton gözükecek?
+              final canCancel = (status == 'new' || status == 'preparing') &&
+                  !cancelRequested;
+              final canReturn =
+                  (status == 'shipped' || status == 'completed') &&
+                      !returnRequested;
+
               // Ürün sayısı
               int itemCount = 0;
               for (var it in items) {
@@ -226,8 +384,8 @@ class OrdersScreen extends StatelessWidget {
                   subtitle: Row(
                     children: [
                       Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
                           color: _statusColor(status).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(999),
@@ -263,8 +421,8 @@ class OrdersScreen extends StatelessWidget {
                       children: [
                         Text(
                           '$itemCount ürün',
-                          style:
-                              const TextStyle(color: Colors.white70, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
                         ),
                       ],
                     ),
@@ -277,11 +435,13 @@ class OrdersScreen extends StatelessWidget {
                       children: [
                         Text(
                           'Ürünler: ${_formatMoney(subtotal)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
                         ),
                         Text(
                           'Kargo: ${_formatMoney(shipping)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
                         ),
                       ],
                     ),
@@ -408,6 +568,62 @@ class OrdersScreen extends StatelessWidget {
                         ),
                       );
                     }).toList(),
+
+                    const SizedBox(height: 12),
+
+                    // İPTAL / İADE BUTONLARI
+                    if (canCancel || canReturn)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (canCancel)
+                            TextButton.icon(
+                              onPressed: () =>
+                                  _sendCancelRequest(context, orderId: id, userId: uid),
+                              icon: const Icon(Icons.cancel_outlined,
+                                  size: 18, color: Colors.redAccent),
+                              label: const Text(
+                                'İptal talebi',
+                                style: TextStyle(color: Colors.redAccent),
+                              ),
+                            ),
+                          if (canReturn)
+                            TextButton.icon(
+                              onPressed: () =>
+                                  _sendReturnRequest(context, orderId: id, userId: uid),
+                              icon: const Icon(Icons.assignment_return_outlined,
+                                  size: 18, color: Color(0xFFFFD166)),
+                              label: const Text(
+                                'İade talebi',
+                                style: TextStyle(color: Color(0xFFFFD166)),
+                              ),
+                            ),
+                        ],
+                      ),
+
+                    // Eğer talep zaten oluşturulmuşsa bilgi yazısı
+                    if (!canCancel && cancelRequested)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          'İptal talebi: ${cancelStatus.isEmpty ? "beklemede" : cancelStatus}',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    if (!canReturn && returnRequested)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          'İade talebi: ${returnStatus.isEmpty ? "beklemede" : returnStatus}',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               );
