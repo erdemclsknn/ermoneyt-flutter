@@ -297,7 +297,8 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                         itemBuilder: (ctx, index) {
                           final o = _orders[index];
                           final cargoCtrl =
-                              _cargoControllers[o.id] ?? TextEditingController();
+                              _cargoControllers[o.id] ??
+                                  TextEditingController();
                           _cargoControllers[o.id] = cargoCtrl;
 
                           final statusLabel =
@@ -515,7 +516,7 @@ class _ReturnsScreenState extends State<ReturnsScreen> {
                                                   const EdgeInsets
                                                       .symmetric(
                                                 vertical: 10,
-                                              ), // 🔧 BURASI DÜZELDİ
+                                              ),
                                               shape:
                                                   RoundedRectangleBorder(
                                                 borderRadius:
@@ -585,8 +586,7 @@ class _ReturnOrder {
     required this.items,
     required this.returnStatus,
     required this.returnCargoCode,
-    this.savingCargo = false,
-  });
+  }) : savingCargo = false; // default değer burada
 }
 
 class _ReturnOrderItem {
