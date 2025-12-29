@@ -1,20 +1,31 @@
 // lib/main.dart
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
 
+// WebView platform (Android)
+import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+
 import 'providers/cart_provider.dart';
 import 'screens/mobile_home_screen.dart';
 import 'screens/cart_screen.dart';
 import 'screens/category_screen.dart';
-import 'screens/account_screen.dart'; // ⬅️ YENİ HESAP EKRANI
+import 'screens/account_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // google-services.json zaten var, bu kadarı yeterli
+  // ✅ WebView platform init (Android)
+  if (Platform.isAndroid) {
+    WebViewPlatform.instance = AndroidWebViewPlatform();
+  }
+
+  // google-services.json zaten var
   await Firebase.initializeApp();
 
   runApp(const ErmoneytApp());
@@ -44,7 +55,7 @@ class ErmoneytApp extends StatelessWidget {
           ),
           cardColor: const Color(0xFF131822),
         ),
-        home: const SplashScreen(), // ⬅️ Splash yapısı aynen duruyor
+        home: const SplashScreen(),
         routes: {
           CartScreen.routeName: (_) => const CartScreen(),
         },
@@ -67,9 +78,9 @@ class _MobileShellState extends State<MobileShell> {
   // Sekmeler (Ana = index 0)
   final _pages = const [
     MobileHomeScreen(), // Ana
-    CategoryScreen(),   // Kategori
-    CartScreen(),       // Sepet
-    AccountScreen(),    // ⬅️ HESAP (artık Placeholder değil)
+    CategoryScreen(), // Kategori
+    CartScreen(), // Sepet
+    AccountScreen(), // Hesap
   ];
 
   @override
@@ -128,7 +139,6 @@ class _SplashScreenState extends State<SplashScreen>
   late AnimationController _logoController;
   late Animation<double> _logoScale;
 
-  // Slogan
   static const String _slogan = 'Sen ne istersen burada';
 
   @override

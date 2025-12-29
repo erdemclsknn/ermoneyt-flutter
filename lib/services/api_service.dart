@@ -9,11 +9,19 @@ class ApiService {
   /// ✔ Sabit Elastic IP kullandık (değişmeyecek)
   static const String baseUrl = 'http://51.20.206.19:3000';
 
+  /// ✅ Mobil isteği işaretle (backend isMobileRequest bunu yakalayacak)
+  static const Map<String, String> _mobileHeaders = {
+    'Content-Type': 'application/json',
+    'x-client': 'mobile',
+  };
+
   /* -------------------- ÜRÜNLER -------------------- */
 
   static Future<List<Product>> fetchProducts() async {
     final uri = Uri.parse('$baseUrl/api/products');
-    final res = await http.get(uri);
+    final res = await http.get(uri, headers: {
+      'x-client': 'mobile',
+    });
 
     if (res.statusCode == 200) {
       final List data = jsonDecode(res.body);
@@ -25,7 +33,9 @@ class ApiService {
 
   static Future<Product> fetchProduct(String id) async {
     final uri = Uri.parse('$baseUrl/api/products/$id');
-    final res = await http.get(uri);
+    final res = await http.get(uri, headers: {
+      'x-client': 'mobile',
+    });
 
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
@@ -39,16 +49,16 @@ class ApiService {
 
   static Future<List<BannerModel>> fetchBanners() async {
     final uri = Uri.parse('$baseUrl/api/banners');
-    final res = await http.get(uri);
+    final res = await http.get(uri, headers: {
+      'x-client': 'mobile',
+    });
 
     if (res.statusCode == 200) {
       final List data = jsonDecode(res.body);
 
       final banners = data
           .map((e) => BannerModel.fromJson(e))
-          .where(
-            (b) => b.isActive && (b.place == 'mobile' || b.place == 'both'),
-          )
+          .where((b) => b.isActive && (b.place == 'mobile' || b.place == 'both'))
           .toList();
 
       banners.sort((a, b) => a.order.compareTo(b.order));
@@ -61,17 +71,39 @@ class ApiService {
   /* -------------------- SİPARİŞ OLUŞTURMA -------------------- */
 
   static Future<Map<String, dynamic>> createOrder(
-      Map<String, dynamic> payload) async {
+    Map<String, dynamic> payload,
+  ) async {
     final uri = Uri.parse('$baseUrl/api/orders');
 
     final res = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _mobileHeaders,
       body: jsonEncode(payload),
     );
 
     if (res.statusCode != 200) {
-      throw Exception('Sipariş isteği başarısız: HTTP ${res.statusCode}');
+      throw Exception('Sipariş isteği başarısız: HTTP ${res.statusCode} - ${res.body}');
+    }
+
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data;
+  }
+
+  /* -------------------- IYZICO INIT (HTML DÖNER) -------------------- */
+
+  static Future<Map<String, dynamic>> initIyzicoCheckoutForm(
+    String orderId,
+  ) async {
+    final uri = Uri.parse('$baseUrl/api/payments/iyzico/init');
+
+    final res = await http.post(
+      uri,
+      headers: _mobileHeaders,
+      body: jsonEncode({'orderId': orderId}),
+    );
+
+    if (res.statusCode != 200) {
+      throw Exception('Iyzico init başarısız: HTTP ${res.statusCode} - ${res.body}');
     }
 
     final data = jsonDecode(res.body) as Map<String, dynamic>;

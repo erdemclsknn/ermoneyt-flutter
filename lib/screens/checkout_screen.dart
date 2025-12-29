@@ -1,9 +1,14 @@
 // lib/screens/checkout_screen.dart
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+// Android debug için
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../models/product.dart';
 import '../providers/cart_provider.dart';
@@ -11,8 +16,6 @@ import 'account_screen.dart';
 import '../services/api_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
-  /// İstersen tek ürün için de kullanabilirsin:
-  /// CheckoutScreen(product: p, qty: 2)
   final Product? product;
   final int? qty;
 
@@ -29,24 +32,34 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   String? _selectedAddressId;
   Map<String, dynamic>? _selectedAddressData;
+
   bool _saving = false;
   String? _error;
 
-  // Sadece online kart (Shopier) kullanıyoruz
-  String _selectedPaymentMethod = 'online_card';
+  static const double _freeShippingThreshold = 350.0;
+  static const double _shippingFeeUnderThreshold = 100.0;
 
-  // KARGO KURALI
-  static const double _freeShippingThreshold = 350.0; // 350 TL ve üzeri ücretsiz
-  static const double _shippingFeeUnderThreshold = 100.0; // altına 100 TL
+  /// ✅ MOBİL success/fail (webden bağımsız)
+  static const String _mobileSuccessUrl = 'ermoneyt://payment-success';
+  static const String _mobileFailUrl = 'ermoneyt://payment-failed';
 
-  // ---------- Firestore'daki sepeti temizle ----------
+  static const String _apiBase = 'https://api.ermoneyt.com';
+
+  // WebView state
+  bool _showIyzico = false;
+  String? _currentOrderId;
+  WebViewController? _iyzicoController;
+  bool _iyzicoLoading = false;
+
+  // “URL ile açmayı dene, olmazsa HTML göm” fallback kontrolü
+  bool _usingUrlMode = true;
+
   Future<void> _clearRemoteCart(String uid) async {
     try {
       final col = FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .collection('cart');
-
       final snap = await col.get();
       if (snap.docs.isEmpty) return;
 
@@ -60,14 +73,194 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
+  String _normalizeHtml(String inner) {
+    final s = inner.trim().toLowerCase();
+    final alreadyFullDoc =
+        s.contains('<html') || s.contains('<head') || s.contains('<body');
+    if (alreadyFullDoc) return inner;
+
+    return '''
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>İyzico Ödeme</title>
+<style>
+  body { margin:0; background:#0b0f17; color:#fff; font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+</style>
+</head>
+<body>
+$inner
+</body>
+</html>
+''';
+  }
+
+  void _closeIyzico() {
+    if (!mounted) return;
+    setState(() {
+      _showIyzico = false;
+      _currentOrderId = null;
+      _iyzicoController = null;
+      _iyzicoLoading = false;
+      _usingUrlMode = true;
+    });
+  }
+
+  bool _isMobileSuccessUrl(String url) => url.startsWith(_mobileSuccessUrl);
+  bool _isMobileFailUrl(String url) => url.startsWith(_mobileFailUrl);
+
+  Future<void> _goSuccess({
+    required String orderId,
+    required bool isSingleProduct,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      await _clearRemoteCart(uid);
+    }
+    if (!mounted) return;
+
+    if (!isSingleProduct) {
+      context.read<CartProvider>().clear();
+    }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => PaymentResultScreen(success: true, orderId: orderId),
+      ),
+    );
+  }
+
+  Future<void> _goFail({required String orderId}) async {
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PaymentResultScreen(success: false, orderId: orderId),
+      ),
+    );
+  }
+
+  WebViewController _buildController({
+    required String orderId,
+    required bool isSingleProduct,
+  }) {
+    if (Platform.isAndroid) {
+      AndroidWebViewController.enableDebugging(true);
+    }
+
+    return WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0B0F17))
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (request) async {
+            final url = request.url;
+            debugPrint('🔎 WebView nav: $url');
+
+            if (_isMobileSuccessUrl(url)) {
+              await _goSuccess(
+                orderId: orderId,
+                isSingleProduct: isSingleProduct,
+              );
+              return NavigationDecision.prevent;
+            }
+
+            if (_isMobileFailUrl(url)) {
+              await _goFail(orderId: orderId);
+              return NavigationDecision.prevent;
+            }
+
+            return NavigationDecision.navigate;
+          },
+          onPageStarted: (_) {
+            if (mounted) setState(() => _iyzicoLoading = true);
+          },
+          onPageFinished: (_) {
+            if (mounted) setState(() => _iyzicoLoading = false);
+          },
+          onWebResourceError: (err) async {
+            debugPrint('❌ WebView error: ${err.errorCode} ${err.description}');
+            if (mounted) setState(() => _iyzicoLoading = false);
+
+            // ✅ URL mode patlarsa HTML fallback’e geç
+            if (_usingUrlMode) {
+              debugPrint('⚠️ URL mode failed -> switching to HTML embed fallback...');
+              await _fallbackToHtml(
+                orderId: orderId,
+                isSingleProduct: isSingleProduct,
+              );
+            }
+          },
+        ),
+      );
+  }
+
+  void _openIyzicoByUrl({
+    required String orderId,
+    required bool isSingleProduct,
+  }) {
+    final controller =
+        _buildController(orderId: orderId, isSingleProduct: isSingleProduct);
+
+    if (!mounted) return;
+    setState(() {
+      _currentOrderId = orderId;
+      _iyzicoController = controller;
+      _showIyzico = true;
+      _iyzicoLoading = true;
+      _usingUrlMode = true;
+    });
+
+    controller.loadRequest(Uri.parse('$_apiBase/pay/mobile/$orderId'));
+  }
+
+  Future<void> _fallbackToHtml({
+    required String orderId,
+    required bool isSingleProduct,
+  }) async {
+    try {
+      _usingUrlMode = false;
+
+      final init = await ApiService.initIyzicoCheckoutForm(orderId);
+      final ok = init['ok'] == true;
+      final String html =
+          (init['html'] ?? init['checkoutFormContent'] ?? '').toString();
+
+      if (!ok || html.isEmpty) {
+        throw Exception(init['error'] ?? 'IYZICO_INIT_FAILED');
+      }
+
+      final controller =
+          _buildController(orderId: orderId, isSingleProduct: isSingleProduct);
+
+      if (!mounted) return;
+      setState(() {
+        _iyzicoController = controller;
+        _showIyzico = true;
+        _iyzicoLoading = true;
+      });
+
+      controller.loadHtmlString(
+        _normalizeHtml(html),
+        baseUrl: _apiBase,
+      );
+    } catch (e) {
+      debugPrint('❌ HTML fallback failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _error = 'Ödeme ekranı açılamadı (SSL/bağlantı). Sunucu SSL/Proxy ayarlarını kontrol et.';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-
-    // Her ihtimale karşı, user yoksa Hesap ekranına at
-    if (user == null) {
-      return const AccountScreen();
-    }
+    if (user == null) return const AccountScreen();
 
     final uid = user.uid;
     final cart = context.watch<CartProvider>();
@@ -75,20 +268,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final isSingleProduct = widget.product != null;
     final q = widget.qty ?? 1;
 
-    // ---- TOPLAM HESABI (displayPrice üzerinden) ----
     final double subtotal = isSingleProduct
         ? (widget.product!.displayPrice * q)
         : cart.items.values.fold<double>(
             0,
-            (acc, item) =>
-                acc + item.product.displayPrice * item.quantity,
+            (acc, item) => acc + item.product.displayPrice * item.quantity,
           );
 
-    // ---- KARGO HESABI ----
-    final double shipping = subtotal >= _freeShippingThreshold
-        ? 0.0
-        : _shippingFeeUnderThreshold;
-
+    final double shipping =
+        subtotal >= _freeShippingThreshold ? 0.0 : _shippingFeeUnderThreshold;
     final double grandTotal = subtotal + shipping;
 
     return Scaffold(
@@ -105,7 +293,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ---------------- SİPARİŞ ÖZETİ ----------------
                   const Text(
                     'Sipariş Özeti',
                     style: TextStyle(
@@ -117,10 +304,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   const SizedBox(height: 4),
                   const Text(
                     '350 TL ve üzeri siparişlerde kargo ücretsizdir.',
-                    style: TextStyle(
-                      color: Colors.white60,
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: Colors.white60, fontSize: 11),
                   ),
                   const SizedBox(height: 12),
 
@@ -132,15 +316,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       shipping,
                     )
                   else
-                    _cartSummary(
-                      cart,
-                      subtotal,
-                      shipping,
-                    ),
+                    _cartSummary(cart, subtotal, shipping),
 
                   const SizedBox(height: 24),
 
-                  // ---------------- TESLİMAT ADRESİ ----------------
                   const Text(
                     'Teslimat Adresi',
                     style: TextStyle(
@@ -219,16 +398,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           final data = doc.data() as Map<String, dynamic>;
                           final id = doc.id;
 
-                          final title =
-                              (data['title'] ?? 'Adres').toString();
+                          final title = (data['title'] ?? 'Adres').toString();
                           final fullName =
                               (data['fullName'] ?? data['name'] ?? '')
                                   .toString();
-                          final phone =
-                              (data['phone'] ?? data['phoneNumber'] ?? '')
-                                  .toString();
+                          final phone = (data['phone'] ??
+                                  data['phoneNumber'] ??
+                                  '')
+                              .toString();
 
-                          // web + mobil ile uyumlu address satırları
                           final line1 = (data['line1'] ??
                                   data['addressLine'] ??
                                   data['line'] ??
@@ -277,51 +455,36 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                 ),
                               ),
                               subtitle: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const SizedBox(height: 4),
                                   if (fullName.isNotEmpty)
-                                    Text(
-                                      fullName,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
-                                    ),
+                                    Text(fullName,
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12)),
                                   if (line1.isNotEmpty)
-                                    Text(
-                                      line1,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
-                                    ),
+                                    Text(line1,
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12)),
                                   if (line2.isNotEmpty)
-                                    Text(
-                                      line2,
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  if (city.isNotEmpty ||
-                                      district.isNotEmpty)
+                                    Text(line2,
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12)),
+                                  if (city.isNotEmpty || district.isNotEmpty)
                                     Text(
                                       '$district / $city',
                                       style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                      ),
+                                          color: Colors.white70,
+                                          fontSize: 12),
                                     ),
                                   if (phone.isNotEmpty)
-                                    Text(
-                                      phone,
-                                      style: const TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 12,
-                                      ),
-                                    ),
+                                    Text(phone,
+                                        style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 12)),
                                 ],
                               ),
                             ),
@@ -329,46 +492,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         }).toList(),
                       );
                     },
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // ---------------- ÖDEME YÖNTEMİ ----------------
-                  const Text(
-                    'Ödeme Yöntemi',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
-                    color: const Color(0xFF131822),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: const BorderSide(color: Colors.white10),
-                    ),
-                    child: RadioListTile<String>(
-                      value: 'online_card',
-                      groupValue: _selectedPaymentMethod,
-                      activeColor: const Color(0xFFFFD166),
-                      onChanged: (val) {
-                        if (val == null) return;
-                        setState(() => _selectedPaymentMethod = val);
-                      },
-                      title: const Text(
-                        'Kredi / Banka Kartı (Online)',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      subtitle: const Text(
-                        'Shopier ile güvenli online ödeme.',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
                   ),
 
                   const SizedBox(height: 16),
@@ -385,13 +508,91 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ),
                     ),
 
+                  if (_showIyzico && _iyzicoController != null) ...[
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF131822),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Kart ile Ödeme (İyzico)',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _closeIyzico,
+                                child: const Text(
+                                  'Kapat',
+                                  style: TextStyle(
+                                    color: Color(0xFFFFD166),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_currentOrderId != null)
+                            Text(
+                              'Sipariş No: $_currentOrderId',
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 12,
+                              ),
+                            ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 520,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: Stack(
+                                children: [
+                                  WebViewWidget(controller: _iyzicoController!),
+                                  if (_iyzicoLoading)
+                                    const LinearProgressIndicator(
+                                      minHeight: 2,
+                                      color: Color(0xFFFFD166),
+                                      backgroundColor: Colors.transparent,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _usingUrlMode
+                                ? 'Ödeme sayfası açılıyor... (URL mode)'
+                                : 'Ödeme sayfası açılıyor... (HTML fallback)',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 11,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 80),
                 ],
               ),
             ),
           ),
 
-          // ---------------- ALT ÖZET + BUTON ----------------
+          // Bottom bar
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
             decoration: const BoxDecoration(
@@ -401,7 +602,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   color: Colors.black45,
                   blurRadius: 10,
                   offset: Offset(0, -2),
-                ),
+                )
               ],
             ),
             child: SafeArea(
@@ -414,10 +615,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     children: [
                       const Text(
                         'Genel Toplam (kargo dahil)',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                        ),
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
                       ),
                       Text(
                         '${grandTotal.toStringAsFixed(2)} ₺',
@@ -436,8 +634,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFFFD166),
                         foregroundColor: Colors.black,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
@@ -445,6 +642,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       onPressed: _saving
                           ? null
                           : () async {
+                              if (_showIyzico) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Ödeme ekranı zaten açık. Kart bilgilerini gir.'),
+                                  ),
+                                );
+                                return;
+                              }
+
                               if (_selectedAddressId == null ||
                                   _selectedAddressData == null) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -456,18 +663,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                 return;
                               }
 
-                              if (!isSingleProduct &&
-                                  cart.items.isEmpty) {
+                              if (!isSingleProduct && cart.items.isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text(
-                                        'Sepetinizde ürün bulunmuyor.'),
+                                    content:
+                                        Text('Sepetinizde ürün bulunmuyor.'),
                                   ),
                                 );
                                 return;
                               }
 
-                              await _createOrder(
+                              await _createOrderAndStartIyzico(
                                 uid: uid,
                                 isSingleProduct: isSingleProduct,
                                 cart: cart,
@@ -492,9 +698,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               isSingleProduct
                                   ? 'Siparişi Onayla (${grandTotal.toStringAsFixed(2)} ₺)'
                                   : 'Siparişi Onayla',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
                             ),
                     ),
                   ),
@@ -507,7 +712,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // ------------- TEK ÜRÜN ÖZETİ -------------
   Widget _singleProductSummary(
       Product p, int q, double subtotal, double shipping) {
     return Container(
@@ -537,13 +741,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    'Adet: $q',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Text('Adet: $q',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13)),
                   const SizedBox(height: 4),
                   Text(
                     '${subtotal.toStringAsFixed(2)} ₺',
@@ -561,17 +761,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Kargo',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                ),
-              ),
+              const Text('Kargo',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
               Text(
-                shipping == 0
-                    ? 'Ücretsiz'
-                    : '${shipping.toStringAsFixed(2)} ₺',
+                shipping == 0 ? 'Ücretsiz' : '${shipping.toStringAsFixed(2)} ₺',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 14,
@@ -585,9 +778,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // ------------- SEPET ÖZETİ -------------
-  Widget _cartSummary(
-      CartProvider cart, double subtotal, double shipping) {
+  Widget _cartSummary(CartProvider cart, double subtotal, double shipping) {
     final cartItems = cart.items.values.toList();
 
     return Container(
@@ -600,64 +791,53 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ...cartItems.map((item) {
-            final p = item.product;
-            final lineTotal = p.displayPrice * item.quantity;
+          for (final item in cartItems) ...[
+            Builder(builder: (_) {
+              final p = item.product;
+              final lineTotal = p.displayPrice * item.quantity;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      p.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        p.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'x${item.quantity}',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
+                    const SizedBox(width: 8),
+                    Text('x${item.quantity}',
+                        style:
+                            const TextStyle(color: Colors.white70, fontSize: 12)),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${lineTotal.toStringAsFixed(2)} ₺',
+                      style: const TextStyle(
+                        color: Color(0xFFFFD166),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${lineTotal.toStringAsFixed(2)} ₺',
-                    style: const TextStyle(
-                      color: Color(0xFFFFD166),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
+                  ],
+                ),
+              );
+            }),
+          ],
           const Divider(color: Colors.white10, height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Ürünler Toplamı',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                ),
-              ),
+              const Text('Ürünler Toplamı',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
               Text(
                 '${subtotal.toStringAsFixed(2)} ₺',
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -665,22 +845,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Kargo',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                ),
-              ),
+              const Text('Kargo',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
               Text(
-                shipping == 0
-                    ? 'Ücretsiz'
-                    : '${shipping.toStringAsFixed(2)} ₺',
+                shipping == 0 ? 'Ücretsiz' : '${shipping.toStringAsFixed(2)} ₺',
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -689,31 +861,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // ------------- SHOPIER ÖDEME SAYFASINI AÇMA -------------
-  Future<void> _openShopierPayment(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      if (!await canLaunchUrl(uri)) {
-        throw Exception('cannot_launch');
-      }
-
-      await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Ödeme sayfası açılamadı. Lütfen tekrar deneyin.'),
-        ),
-      );
-    }
-  }
-
-  // ------------- SİPARİŞ OLUŞTURMA -------------
-  Future<void> _createOrder({
+  Future<void> _createOrderAndStartIyzico({
     required String uid,
     required bool isSingleProduct,
     required CartProvider cart,
@@ -734,12 +882,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final email = user?.email ?? '';
       final name = user?.displayName ?? '';
 
-      // adres içinden timestamp vs çıkar
       final cleanedAddress = Map<String, dynamic>.from(addressData);
       cleanedAddress.remove('createdAt');
       cleanedAddress.remove('updatedAt');
 
-      // Sipariş ürün listesi
       late final List<Map<String, dynamic>> itemsList;
 
       if (isSingleProduct && product != null) {
@@ -747,7 +893,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           {
             'productId': product.id,
             'name': product.name,
-            'price': product.displayPrice, // ödenen fiyat
+            'price': product.displayPrice,
             'originalPrice': product.salePrice,
             'qty': qty,
             'image': product.image,
@@ -767,12 +913,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         }).toList();
       }
 
-      // web ile aynı: online_card -> card_online
-      final apiPaymentMethod =
-          _selectedPaymentMethod == 'online_card'
-              ? 'card_online'
-              : _selectedPaymentMethod;
-
       final payload = {
         'userId': uid,
         'userEmail': email,
@@ -783,10 +923,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'subtotal': subtotal,
         'shipping': shipping,
         'total': total,
-        'paymentMethod': apiPaymentMethod,
+        'paymentMethod': 'card_online',
+        'paymentProvider': 'iyzico',
+        'channel': 'mobile',
+        'mobileSuccessUrl': _mobileSuccessUrl,
+        'mobileFailUrl': _mobileFailUrl,
       };
 
-      // /api/orders çağrısı
       final resp = await ApiService.createOrder(payload);
 
       if (resp['ok'] != true ||
@@ -796,50 +939,94 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
 
       final String orderId = resp['order']['id'].toString();
-      final String? paymentUrl =
-          resp['paymentUrl']?.toString();
-
-      // 🔥 Sipariş başarıyla oluştu → hem Firestore sepetini hem
-      // lokal CartProvider sepetini temizle
-      await _clearRemoteCart(uid);
-      if (!isSingleProduct) {
-        cart.clear();
-      }
 
       if (!mounted) return;
 
-      if (_selectedPaymentMethod == 'online_card') {
-        if (paymentUrl == null || paymentUrl.isEmpty) {
-          throw Exception('NO_PAYMENT_URL');
-        }
+      // ✅ 1) Önce URL ile dene
+      _openIyzicoByUrl(orderId: orderId, isSingleProduct: isSingleProduct);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ödeme sayfasına yönlendiriliyorsun...'),
-          ),
-        );
-
-        await _openShopierPayment(paymentUrl);
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Siparişin alındı (No: $orderId), teşekkürler!'),
-        ),
-      );
-
-      Navigator.of(context).pop(); // checkout ekranını kapat
+      // SSL patlarsa onWebResourceError otomatik HTML fallback’e geçer.
     } catch (e) {
+      debugPrint("createOrder/iyzico error: $e");
+      if (!mounted) return;
       setState(() {
-        _error =
-            'Sipariş oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.';
+        _error = 'Sipariş/Ödeme başlatılamadı. Lütfen tekrar deneyin.';
       });
     } finally {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-        });
-      }
+      if (mounted) setState(() => _saving = false);
     }
+  }
+}
+
+class PaymentResultScreen extends StatelessWidget {
+  final bool success;
+  final String orderId;
+
+  const PaymentResultScreen({
+    super.key,
+    required this.success,
+    required this.orderId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0B0F17),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0B0F17),
+        title: const Text('Ödeme Sonucu'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                success ? Icons.check_circle : Icons.cancel,
+                size: 72,
+                color: success
+                    ? const Color(0xFF22C55E)
+                    : const Color(0xFFEF4444),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                success ? 'Ödeme Başarılı' : 'Ödeme Başarısız',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sipariş No: $orderId',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFD166),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () =>
+                      Navigator.of(context).popUntil((r) => r.isFirst),
+                  child: const Text(
+                    'Ana Sayfaya Dön',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
